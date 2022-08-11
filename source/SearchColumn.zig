@@ -37,7 +37,7 @@ pub fn draw(widget: *SearchColumn, arena: std.mem.Allocator, start_x: f32, start
     var x: f32 = start_x + pad;
     var y: f32 = start_y + pad;
 
-    const choose_button_width = 64;
+    const choose_button_width = 80;
     const base_label_text = if (widget.base) |base| blk: {
         break :blk try std.fmt.allocPrintZ(arena, "Base: {s}", .{base});
     } else "Choose a base: ";
@@ -52,4 +52,10 @@ pub fn draw(widget: *SearchColumn, arena: std.mem.Allocator, start_x: f32, start
     y += lh + gap;
     if (rl.GuiTextBox(rl.Rectangle.init(x, y, width, lh), widget.search_buffer, widget.search_edit_mode))
         widget.search_edit_mode = !widget.search_edit_mode;
+
+    const default_color = rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_COLOR_NORMAL);
+    rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_COLOR_NORMAL, 0x101010ff);
+    if (widget.search_buffer[0] == 0)
+        rl.GuiLabel(rl.Rectangle.init(x + 4, y, width, lh), "Search...");
+    rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_COLOR_NORMAL, default_color);
 }

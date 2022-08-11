@@ -19,6 +19,9 @@ fn fallibleMain() !void {
     rl.SetWindowMinSize(800, 600);
     rl.SetTargetFPS(60);
 
+    const arial = rl.LoadFontEx("c:/windows/fonts/consola.ttf", 20, null);
+    rl.GuiSetFont(arial);
+
     var search_column = try SearchColumn.init(allocator);
     defer search_column.deinit();
 
@@ -33,6 +36,7 @@ fn fallibleMain() !void {
         const height = @intToFloat(f32, rl.GetRenderHeight());
 
         rl.ClearBackground(rl.RAYWHITE);
+        rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SIZE, 20);
         try search_column.draw(arena.allocator(), 0, 0, width * 0.6, height);
     }
 }
