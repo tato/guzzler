@@ -21,6 +21,9 @@ fn fallibleMain() !void {
     const pixel_operator = rl.LoadFontFromMemory(".ttf", pixel_operator_data, 28, null);
     gui.setFont(pixel_operator);
 
+    const segoe_ui = rl.LoadFontEx("c:/windows/fonts/segoeui.ttf", 28, null);
+    gui.setFont(segoe_ui);
+
     while (!rl.WindowShouldClose()) {
         var arena = std.heap.ArenaAllocator.init(allocator);
         defer arena.deinit();
@@ -34,24 +37,30 @@ fn fallibleMain() !void {
         defer gui.end();
 
         {
-            const search_column = gui.blockLayout("search column", .y);
-            search_column.semantic_size[0] = .{ .kind = .percent_of_parent, .value = 0.6, .strictness = 1 };
-            search_column.semantic_size[1] = .{ .kind = .percent_of_parent, .value = 1, .strictness = 1 };
-            gui.pushParent(search_column);
+            gui.pushParent(gui.blockLayout("search column", .y));
+            gui.withSize(
+                gui.Size.init(.pixels, 500, 1),
+                gui.Size.init(.percent_of_parent, 1, 1),
+            );
             defer gui.popParent();
 
             {
-                const base_chooser = gui.blockLayout("base chooser", .x);
-                base_chooser.semantic_size[0] = .{ .kind = .percent_of_parent, .value = 1, .strictness = 1 };
-                base_chooser.semantic_size[1] = .{ .kind = .children_sum, .value = 0, .strictness = 1 };
-                gui.pushParent(base_chooser);
+                gui.pushParent(gui.blockLayout("base chooser", .x));
+                gui.withSize(
+                    gui.Size.init(.percent_of_parent, 1, 1),
+                    gui.Size.init(.children_sum, 1, 1),
+                );
                 defer gui.popParent();
 
                 gui.label("Choose a base...");
+                gui.withSize(gui.Size.init(.percent_of_parent, 1, 0), gui.Size.init(.text_content, 1, 1));
+
                 gui.label("Choose");
+                gui.withBorder();
             }
 
             gui.label("Search...");
+            gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.text_content, 1, 1));
         }
     }
 }

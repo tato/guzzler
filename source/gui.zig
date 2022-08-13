@@ -11,6 +11,7 @@ const Gui = struct {
 
     primordial_parent: *Block,
     current_parent: *Block,
+    last_inserted: *Block,
 
     font: rl.Font,
 };
@@ -60,7 +61,8 @@ const Block = struct {
 };
 
 const BlockFlags = packed struct {
-    _padding: u32 = 0,
+    border: bool = false,
+    _padding: u31 = 0,
 
     comptime {
         std.debug.assert(@bitSizeOf(BlockFlags) == 32);
@@ -75,10 +77,14 @@ const SizeKind = enum {
     children_sum,
 };
 
-const Size = struct {
+pub const Size = struct {
     kind: SizeKind,
     value: f32,
     strictness: f32,
+
+    pub fn init(kind: SizeKind, value: f32, strictness: f32) Size {
+        return Size{ .kind = kind, .value = value, .strictness = strictness };
+    }
 };
 
 const Axis = enum {
@@ -92,13 +98,12 @@ const Key = u64;
 pub fn init(gpa: std.mem.Allocator) void {
     const primordial_parent = gpa.create(Block) catch unreachable;
     primordial_parent.* = std.mem.zeroes(Block);
-    primordial_parent.semantic_size[0] = .{ .kind = .percent_of_parent, .value = 1, .strictness = 1 };
-    primordial_parent.semantic_size[1] = .{ .kind = .percent_of_parent, .value = 1, .strictness = 1 };
     gui = Gui{
         .gpa = gpa,
         .arena = undefined,
         .primordial_parent = primordial_parent,
         .current_parent = primordial_parent,
+        .last_inserted = primordial_parent,
         .font = rl.GetFontDefault(),
     };
 }
@@ -111,7 +116,10 @@ pub fn begin() void {
     gui.arena = std.heap.ArenaAllocator.init(gui.gpa);
     gui.frame_index += 1;
     gui.current_parent = gui.primordial_parent;
+
     gui.primordial_parent.clearPerFrameInfo();
+    gui.primordial_parent.semantic_size[0] = .{ .kind = .percent_of_parent, .value = 1, .strictness = 1 };
+    gui.primordial_parent.semantic_size[1] = .{ .kind = .percent_of_parent, .value = 1, .strictness = 1 };
 }
 
 pub fn end() void {
@@ -121,18 +129,7 @@ pub fn end() void {
     solveViolations(gui.primordial_parent);
     computeRelativePositions(gui.primordial_parent, .{ 0, 0 });
 
-    const doIt = struct {
-        fn doIt(block: *Block) void {
-            if (block.string) |string| {
-                const position = rl.Vector2.init(block.rect.x, block.rect.y);
-                rl.DrawTextEx(gui.font, string, position, @intToFloat(f32, gui.font.baseSize), 0, rl.BLACK);
-            }
-
-            if (block.first) |first| doIt(first);
-            if (block.next) |next| doIt(next);
-        }
-    }.doIt;
-    doIt(gui.primordial_parent);
+    renderTree(gui.primordial_parent);
 
     pruneWidgets() catch unreachable;
 
@@ -153,6 +150,14 @@ pub fn label(comptime string: [:0]const u8) void {
     block.string = string;
     block.semantic_size[@enumToInt(Axis.x)].kind = .text_content;
     block.semantic_size[@enumToInt(Axis.y)].kind = .text_content;
+}
+
+pub fn withBorder() void {
+    gui.last_inserted.flags.border = true;
+}
+
+pub fn withSize(x: Size, y: Size) void {
+    gui.last_inserted.semantic_size = .{ x, y };
 }
 
 pub fn blockLayout(comptime string: [:0]const u8, axis: Axis) *Block {
@@ -189,6 +194,7 @@ fn getOrInsertBlock(comptime string: [:0]const u8) *Block {
     gui.current_parent.last = block;
 
     block.last_frame_touched_index = gui.frame_index;
+    gui.last_inserted = block;
 
     return block;
 }
@@ -226,8 +232,8 @@ fn calculateStandaloneSizes(block: *Block) void {
         }
     }
 
-    if (block.first) |first| calculateStandaloneSizes(first);
     if (block.next) |next| calculateStandaloneSizes(next);
+    if (block.first) |first| calculateStandaloneSizes(first);
 }
 
 fn calculateUpwardsDependentSizes(block: *Block) void {
@@ -252,12 +258,12 @@ fn calculateUpwardsDependentSizes(block: *Block) void {
         }
     }
 
-    if (block.first) |first| calculateUpwardsDependentSizes(first);
     if (block.next) |next| calculateUpwardsDependentSizes(next);
+    if (block.first) |first| calculateUpwardsDependentSizes(first);
 }
 
 fn calculateDownwardsDependentSizes(block: *Block) [Axis.len]f32 {
-    var children_size = [2]f32{ 0, 0 };
+    var children_size = [Axis.len]f32{ 0, 0 };
     if (block.first) |first| children_size = calculateDownwardsDependentSizes(first);
 
     for (block.semantic_size) |semantic_size, i| {
@@ -267,16 +273,22 @@ fn calculateDownwardsDependentSizes(block: *Block) [Axis.len]f32 {
         }
     }
 
-    var siblings_size = [2]f32{ 0, 0 };
+    var siblings_size = [Axis.len]f32{ 0, 0 };
     if (block.next) |next| siblings_size = calculateDownwardsDependentSizes(next);
-    for (siblings_size) |*elem, i|
-        elem.* += block.computed_size[i];
+    if (block.parent) |parent| {
+        for (siblings_size) |*elem, i| {
+            if (@enumToInt(parent.layout_axis) == i) {
+                elem.* += block.computed_size[i];
+            } else {
+                elem.* = @maximum(elem.*, block.computed_size[i]);
+            }
+        }
+    }
     return siblings_size;
 }
 
 fn solveViolations(block: *Block) void {
     _ = block;
-    // 4. (Pre-order) Solve violations. For each level in the hierarchy, this will verify that the children do not extend past the boundaries of a given parent (unless explicitly allowed to do so; for example, in the case of a parent that is scrollable on the given axis), to the best of the algorithm’s ability. If there is a violation, it will take a proportion of each child widget’s size (on the given axis) proportional to both the size of the violation, and (1-strictness), where strictness is that specified in the semantic size on the child widget for the given axis.
 }
 
 fn computeRelativePositions(block: *Block, position: [Axis.len]f32) void {
@@ -295,4 +307,24 @@ fn computeRelativePositions(block: *Block, position: [Axis.len]f32) void {
 
     if (block.first) |first| computeRelativePositions(first, std.mem.zeroes([Axis.len]f32));
     if (block.next) |next| computeRelativePositions(next, next_position);
+}
+
+fn renderTree(block: *Block) void {
+    if (block.string) |string| {
+        const position = rl.Vector2.init(block.rect.x, block.rect.y);
+        rl.DrawTextEx(gui.font, string, position, @intToFloat(f32, gui.font.baseSize), 0, rl.BLACK);
+    }
+
+    if (block.flags.border) {
+        rl.DrawLineStrip(&.{
+            rl.Vector2.init(block.rect.x, block.rect.y),
+            rl.Vector2.init(block.rect.x + block.rect.width, block.rect.y),
+            rl.Vector2.init(block.rect.x + block.rect.width, block.rect.y + block.rect.height),
+            rl.Vector2.init(block.rect.x, block.rect.y + block.rect.height),
+            rl.Vector2.init(block.rect.x, block.rect.y),
+        }, rl.BLACK);
+    }
+
+    if (block.first) |first| renderTree(first);
+    if (block.next) |next| renderTree(next);
 }
