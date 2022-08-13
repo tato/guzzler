@@ -15,6 +15,7 @@ image_path_list: std.ArrayListUnmanaged([:0]const u8) = .{},
 image_path_list_scroll: rl.Vector2 = std.mem.zeroes(rl.Vector2),
 hovered_path: ?[:0]const u8 = null,
 hovered_image: ?rl.Texture = null,
+clicked_image: ?[:0]const u8 = null,
 
 pub fn init(allocator: std.mem.Allocator) !SearchColumn {
     var col = SearchColumn{
@@ -94,6 +95,10 @@ pub fn draw(widget: *SearchColumn, arena: std.mem.Allocator, start_x: f32, start
                 widget.hovered_path = try widget.allocator.dupeZ(u8, path);
                 const hovered_full_path = try std.fmt.allocPrintZ(arena, "{s}/{s}", .{ widget.base.?, widget.hovered_path.? });
                 widget.hovered_image = rl.LoadTexture(hovered_full_path);
+            }
+
+            if (rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT)) {
+                widget.clicked_image = &widget.hovered_image.?;
             }
         }
         rl.GuiLabel(list_item_bounds, path);
