@@ -18,7 +18,7 @@ fn fallibleMain() !void {
     gui.init(allocator);
 
     const pixel_operator_data = @embedFile("../raylib/raygui/styles/dark/PixelOperator.ttf");
-    const pixel_operator = rl.LoadFontFromMemory(".ttf", pixel_operator_data, 20, null);
+    const pixel_operator = rl.LoadFontFromMemory(".ttf", pixel_operator_data, 28, null);
     gui.setFont(pixel_operator);
 
     while (!rl.WindowShouldClose()) {
@@ -33,15 +33,25 @@ fn fallibleMain() !void {
         gui.begin();
         defer gui.end();
 
-        // gui.push(gui.layout(.vertical));
+        {
+            const search_column = gui.blockLayout("search column", .y);
+            search_column.semantic_size[0] = .{ .kind = .percent_of_parent, .value = 0.6, .strictness = 1 };
+            search_column.semantic_size[1] = .{ .kind = .percent_of_parent, .value = 1, .strictness = 1 };
+            gui.pushParent(search_column);
+            defer gui.popParent();
 
-        // gui.push(gui.layout(.horizontal));
-        gui.label("Choose a base...");
-        // gui.label("Choose");
-        // gui.pop();
+            {
+                const base_chooser = gui.blockLayout("base chooser", .x);
+                base_chooser.semantic_size[0] = .{ .kind = .percent_of_parent, .value = 1, .strictness = 1 };
+                base_chooser.semantic_size[1] = .{ .kind = .children_sum, .value = 0, .strictness = 1 };
+                gui.pushParent(base_chooser);
+                defer gui.popParent();
 
-        gui.label("Search...");
+                gui.label("Choose a base...");
+                gui.label("Choose");
+            }
 
-        // gui.pop();
+            gui.label("Search...");
+        }
     }
 }
