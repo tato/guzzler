@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const rl = @import("raylib");
+const nfd = @import("nfd");
 const gui = @import("gui.zig");
 
 pub fn main() void {
@@ -55,7 +56,12 @@ fn fallibleMain() !void {
                 gui.label("Choose a base...");
                 gui.withSize(gui.Size.init(.percent_of_parent, 1, 0), gui.Size.init(.text_content, 1, 1));
 
-                gui.label("Choose");
+                if (gui.button("Choose")) {
+                    const path = nfd.openFolderDialog(null) catch @panic("nativefiledialog returned with error");
+                    defer if (path) |p| nfd.freePath(p);
+
+                    std.log.info("PATH: {?s}", .{path});
+                }
                 gui.withBorder();
             }
 

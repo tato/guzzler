@@ -152,6 +152,18 @@ pub fn label(comptime string: [:0]const u8) void {
     block.semantic_size[@enumToInt(Axis.y)].kind = .text_content;
 }
 
+pub fn button(comptime string: [:0]const u8) bool {
+    const block = getOrInsertBlock(string);
+
+    block.string = string;
+    block.semantic_size[@enumToInt(Axis.x)].kind = .text_content;
+    block.semantic_size[@enumToInt(Axis.y)].kind = .text_content;
+    block.flags.border = true;
+
+    const mouse_position = rl.GetMousePosition();
+    return rl.CheckCollisionPointRec(mouse_position, block.rect) and rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT);
+}
+
 pub fn withBorder() void {
     gui.last_inserted.flags.border = true;
 }
