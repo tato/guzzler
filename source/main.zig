@@ -43,7 +43,6 @@ fn fallibleMain() !void {
                 gui.Size.init(.percent_of_parent, 0.6, 1),
                 gui.Size.init(.percent_of_parent, 1, 1),
             );
-            gui.withBorder();
             defer gui.popParent();
 
             {
@@ -68,6 +67,44 @@ fn fallibleMain() !void {
 
             gui.label("Search...");
             gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.text_content, 1, 1));
+
+            pathList();
         }
+    }
+}
+
+var scroll_percent: f32 = 0.35;
+fn pathList() void {
+    gui.pushParent(gui.blockLayout("scrollable container", .x));
+    gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, 1, 0));
+    // gui.withBorder();
+    defer gui.popParent();
+
+    {
+        gui.pushParent(gui.blockLayout("scrollable content", .y));
+        gui.withSize(gui.Size.init(.percent_of_parent, 1, 0), gui.Size.init(.percent_of_parent, 1, 1));
+        gui.withBorder();
+        defer gui.popParent();
+    }
+
+    {
+        gui.pushParent(gui.blockLayout("scroll bar", .y));
+        gui.withSize(gui.Size.init(.pixels, 50, 1), gui.Size.init(.percent_of_parent, 1, 1));
+        gui.withBorder();
+        defer gui.popParent();
+
+        const scroller_size_in_percent: f32 = 0.1;
+
+        _ = gui.blockLayout("before scroller", .x);
+        gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, scroll_percent - scroller_size_in_percent / 2, 1));
+        gui.withBorder();
+
+        _ = gui.blockLayout("scroller", .x);
+        gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, scroller_size_in_percent, 1));
+        gui.withBorder();
+
+        _ = gui.blockLayout("after scroller", .x);
+        gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, (1 - scroll_percent) - scroller_size_in_percent / 2, 1));
+        gui.withBorder();
     }
 }
