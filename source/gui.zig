@@ -120,6 +120,9 @@ pub fn begin() void {
     gui.primordial_parent.clearPerFrameInfo();
     gui.primordial_parent.semantic_size[0] = .{ .kind = .percent_of_parent, .value = 1, .strictness = 1 };
     gui.primordial_parent.semantic_size[1] = .{ .kind = .percent_of_parent, .value = 1, .strictness = 1 };
+    gui.primordial_parent.computed_size = .{ @intToFloat(f32, rl.GetScreenWidth()), @intToFloat(f32, rl.GetScreenHeight()) };
+    gui.primordial_parent.computed_rel_position = .{ 0, 0 };
+    gui.primordial_parent.rect = rl.Rectangle.init(0, 0, gui.primordial_parent.computed_size[0], gui.primordial_parent.computed_size[1]);
 }
 
 pub fn end() void {
@@ -127,7 +130,7 @@ pub fn end() void {
     calculateUpwardsDependentSizes(gui.primordial_parent);
     _ = calculateDownwardsDependentSizes(gui.primordial_parent);
     solveViolations(gui.primordial_parent);
-    computeRelativePositions(gui.primordial_parent, .{ 0, 0 });
+    computeRelativePositions(gui.primordial_parent);
 
     renderTree(gui.primordial_parent);
 
@@ -230,95 +233,88 @@ fn keyFromString(string: []const u8) Key {
     return std.hash.Wyhash.hash(420, string);
 }
 
-fn calculateStandaloneSizes(block: *Block) void {
-    for (block.semantic_size) |semantic_size, i| {
-        switch (semantic_size.kind) {
-            .pixels => block.computed_size[i] = semantic_size.value,
-            .text_content => {
-                block.computed_size[i] = if (block.string) |string| switch (@intToEnum(Axis, i)) {
-                    .x => @intToFloat(f32, rl.MeasureText(string, gui.font.baseSize)),
-                    .y => @intToFloat(f32, gui.font.baseSize),
-                } else 0;
-            },
-            else => {},
+fn calculateStandaloneSizes(first_sibling: *Block) void {
+    var current_sibling: ?*Block = first_sibling;
+    while (current_sibling) |block| : (current_sibling = block.next) {
+        for (block.semantic_size) |semantic_size, i| {
+            switch (semantic_size.kind) {
+                .pixels => block.computed_size[i] = semantic_size.value,
+                .text_content => {
+                    block.computed_size[i] = if (block.string) |string| switch (@intToEnum(Axis, i)) {
+                        .x => @intToFloat(f32, rl.MeasureText(string, gui.font.baseSize)),
+                        .y => @intToFloat(f32, gui.font.baseSize),
+                    } else 0;
+                },
+                else => {},
+            }
         }
-    }
 
-    if (block.next) |next| calculateStandaloneSizes(next);
-    if (block.first) |first| calculateStandaloneSizes(first);
+        if (block.first) |first| calculateStandaloneSizes(first);
+    }
 }
 
-fn calculateUpwardsDependentSizes(block: *Block) void {
-    for (block.semantic_size) |semantic_size, i| {
-        switch (semantic_size.kind) {
-            .percent_of_parent => {
-                if (block.parent) |parent| {
-                    switch (parent.semantic_size[i].kind) {
-                        .pixels, .text_content, .percent_of_parent => {
-                            block.computed_size[i] = parent.computed_size[i] * semantic_size.value;
-                        },
-                        else => block.computed_size[i] = 0,
+fn calculateUpwardsDependentSizes(first_sibling: *Block) void {
+    var current_sibling: ?*Block = first_sibling;
+    while (current_sibling) |parent| : (current_sibling = parent.next) {
+        var current_child = parent.first;
+        while (current_child) |child| : (current_child = child.next) {
+            for (child.semantic_size) |semantic_size, i| switch (semantic_size.kind) {
+                .percent_of_parent => child.computed_size[i] = switch (parent.semantic_size[i].kind) {
+                    .pixels, .text_content, .percent_of_parent => parent.computed_size[i] * semantic_size.value,
+                    else => 0,
+                },
+                else => {},
+            };
+        }
+
+        if (parent.first) |first| calculateUpwardsDependentSizes(first);
+    }
+}
+
+fn calculateDownwardsDependentSizes(first_sibling: *Block) void {
+    var current_sibling: ?*Block = first_sibling;
+    while (current_sibling) |block| : (current_sibling = block.next) {
+        if (block.first) |first| calculateDownwardsDependentSizes(first);
+
+        for (block.semantic_size) |semantic_size, i| {
+            switch (semantic_size.kind) {
+                .children_sum => {
+                    block.computed_size[i] = 0;
+
+                    var current_child = block.first;
+                    while (current_child) |child| : (current_child = child.next) {
+                        if (@enumToInt(block.layout_axis) == i)
+                            block.computed_size[i] += child.computed_size[i]
+                        else
+                            block.computed_size[i] = @maximum(block.computed_size[i], child.computed_size[i]);
                     }
-                } else {
-                    block.computed_size[i] = switch (@intToEnum(Axis, i)) {
-                        .x => @intToFloat(f32, rl.GetScreenWidth()) * semantic_size.value,
-                        .y => @intToFloat(f32, rl.GetScreenHeight()) * semantic_size.value,
-                    };
-                }
-            },
-            else => {},
-        }
-    }
-
-    if (block.next) |next| calculateUpwardsDependentSizes(next);
-    if (block.first) |first| calculateUpwardsDependentSizes(first);
-}
-
-fn calculateDownwardsDependentSizes(block: *Block) [Axis.len]f32 {
-    var children_size = [Axis.len]f32{ 0, 0 };
-    if (block.first) |first| children_size = calculateDownwardsDependentSizes(first);
-
-    for (block.semantic_size) |semantic_size, i| {
-        switch (semantic_size.kind) {
-            .children_sum => block.computed_size[i] = children_size[i],
-            else => {},
-        }
-    }
-
-    var siblings_size = [Axis.len]f32{ 0, 0 };
-    if (block.next) |next| siblings_size = calculateDownwardsDependentSizes(next);
-    if (block.parent) |parent| {
-        for (siblings_size) |*elem, i| {
-            if (@enumToInt(parent.layout_axis) == i) {
-                elem.* += block.computed_size[i];
-            } else {
-                elem.* = @maximum(elem.*, block.computed_size[i]);
+                },
+                else => {},
             }
         }
     }
-    return siblings_size;
 }
 
 fn solveViolations(block: *Block) void {
     _ = block;
 }
 
-fn computeRelativePositions(block: *Block, position: [Axis.len]f32) void {
-    for (block.computed_rel_position) |*computed_rel_position, i|
-        computed_rel_position.* = position[i];
-
-    var next_position = position;
-    if (block.parent) |parent|
-        next_position[@enumToInt(parent.layout_axis)] += block.computed_size[@enumToInt(parent.layout_axis)];
-
+fn computeRelativePositions(block: *Block) void {
     const parent_rect = if (block.parent) |parent| parent.rect else rl.Rectangle.init(0, 0, 0, 0);
     block.rect.x = parent_rect.x + block.computed_rel_position[0];
     block.rect.y = parent_rect.y + block.computed_rel_position[1];
     block.rect.width = block.computed_size[0];
     block.rect.height = block.computed_size[1];
 
-    if (block.first) |first| computeRelativePositions(first, std.mem.zeroes([Axis.len]f32));
-    if (block.next) |next| computeRelativePositions(next, next_position);
+    var current_position = [Axis.len]f32{ 0, 0 };
+    var current_child = block.first;
+    while (current_child) |child| : (current_child = child.next) {
+        child.computed_rel_position = current_position;
+        current_position[@enumToInt(block.layout_axis)] += child.computed_size[@enumToInt(block.layout_axis)];
+    }
+
+    if (block.first) |first| computeRelativePositions(first);
+    if (block.next) |next| computeRelativePositions(next);
 }
 
 fn renderTree(block: *Block) void {
