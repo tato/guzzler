@@ -74,6 +74,7 @@ fn fallibleMain() !void {
 }
 
 var scroll_percent: f32 = 0.35;
+var is_scrolling: bool = false;
 fn pathList() void {
     gui.pushParent(gui.blockLayout("scrollable container", .x));
     gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, 1, 0));
@@ -99,9 +100,18 @@ fn pathList() void {
         gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, scroll_percent - scroller_size_in_percent / 2, 1));
         gui.withBorder();
 
-        _ = gui.blockLayout("scroller", .x);
+        const scroller = gui.blockLayout("scroller", .x);
         gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, scroller_size_in_percent, 1));
         gui.withBorder();
+        if (is_scrolling) {
+            if (rl.IsMouseButtonReleased(rl.MOUSE_BUTTON_LEFT)) is_scrolling = false;
+            scroll_percent += rl.GetMouseDelta().y / @intToFloat(f32, rl.GetScreenHeight());
+            if (scroll_percent < 0) scroll_percent = 0;
+            if (scroll_percent > 1) scroll_percent = 1;
+        }
+        if (rl.CheckCollisionPointRec(rl.GetMousePosition(), scroller.rect) and rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT)) {
+            is_scrolling = true;
+        }
 
         _ = gui.blockLayout("after scroller", .x);
         gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, (1 - scroll_percent) - scroller_size_in_percent / 2, 1));
