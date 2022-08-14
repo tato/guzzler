@@ -40,9 +40,10 @@ fn fallibleMain() !void {
         {
             gui.pushParent(gui.blockLayout("search column", .y));
             gui.withSize(
-                gui.Size.init(.pixels, 500, 1),
+                gui.Size.init(.percent_of_parent, 0.6, 1),
                 gui.Size.init(.percent_of_parent, 1, 1),
             );
+            gui.withBorder();
             defer gui.popParent();
 
             {

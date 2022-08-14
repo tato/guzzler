@@ -128,7 +128,7 @@ pub fn begin() void {
 pub fn end() void {
     calculateStandaloneSizes(gui.primordial_parent);
     calculateUpwardsDependentSizes(gui.primordial_parent);
-    _ = calculateDownwardsDependentSizes(gui.primordial_parent);
+    calculateDownwardsDependentSizes(gui.primordial_parent);
     solveViolations(gui.primordial_parent);
     computeRelativePositions(gui.primordial_parent);
 
@@ -296,7 +296,30 @@ fn calculateDownwardsDependentSizes(first_sibling: *Block) void {
 }
 
 fn solveViolations(block: *Block) void {
-    _ = block;
+    var children_size = [Axis.len]f32{ 0, 0 };
+
+    var current_child = block.first;
+    while (current_child) |child| : (current_child = child.next) {
+        for (child.computed_size) |computed_size, i| {
+            if (@enumToInt(block.layout_axis) == i) {
+                children_size[i] += computed_size;
+            } else {
+                children_size[i] = @maximum(children_size[i], computed_size);
+            }
+        }
+    }
+
+    current_child = block.first;
+    while (current_child) |child| : (current_child = child.next) {
+        for (child.computed_size) |*child_computed_size, i| {
+            if (children_size[i] > block.computed_size[i]) {
+                const strictness = child.semantic_size[i].strictness;
+                child_computed_size.* *= block.computed_size[i] / children_size[i] * (1 - strictness);
+            }
+        }
+
+        if (child.first) |first| solveViolations(first);
+    }
 }
 
 fn computeRelativePositions(block: *Block) void {
