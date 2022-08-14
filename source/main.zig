@@ -114,13 +114,18 @@ fn pathList() void {
                 is_scrolling = false;
                 rl.SetMouseCursor(rl.MOUSE_CURSOR_DEFAULT);
             }
-            scroll_percent += rl.GetMouseDelta().y / scroll_bar.rect.height;
+            if (scroll_bar.rect.height > 0)
+                scroll_percent += rl.GetMouseDelta().y / scroll_bar.rect.height;
             if (scroll_percent < 0) scroll_percent = 0;
             if (scroll_percent > 1) scroll_percent = 1;
         }
         if (rl.CheckCollisionPointRec(rl.GetMousePosition(), scroller.rect) and rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT)) {
             is_scrolling = true;
             rl.SetMouseCursor(rl.MOUSE_CURSOR_CROSSHAIR);
+        }
+        if (!is_scrolling) {
+            if (scroll_bar.rect.height > 0)
+                scroll_percent -= rl.GetMouseWheelMove() * 5 / scroll_bar.rect.height;
         }
     }
 }
