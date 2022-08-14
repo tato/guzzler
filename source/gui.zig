@@ -48,8 +48,8 @@ const Block = struct {
     pub fn clearPerFrameInfo(block: *Block) void {
         block.flags = .{};
         block.string = null;
-        block.semantic_size[0] = .{ .kind = .none, .value = 0, .strictness = 0 };
-        block.semantic_size[1] = .{ .kind = .none, .value = 0, .strictness = 0 };
+        block.semantic_size[0] = .{ .kind = .text_content, .value = 0, .strictness = 0 };
+        block.semantic_size[1] = .{ .kind = .text_content, .value = 0, .strictness = 0 };
         block.layout_axis = .x;
 
         block.first = null;
@@ -70,7 +70,6 @@ const BlockFlags = packed struct {
 };
 
 const SizeKind = enum {
-    none,
     pixels,
     text_content,
     percent_of_parent,

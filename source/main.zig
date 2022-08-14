@@ -89,32 +89,38 @@ fn pathList() void {
     }
 
     {
-        gui.pushParent(gui.blockLayout("scroll bar", .y));
-        gui.withSize(gui.Size.init(.pixels, 50, 1), gui.Size.init(.percent_of_parent, 1, 1));
+        const scroll_bar = gui.blockLayout("scroll bar", .y);
+        gui.pushParent(scroll_bar);
+        gui.withSize(gui.Size.init(.pixels, 32, 1), gui.Size.init(.percent_of_parent, 1, 1));
         gui.withBorder();
         defer gui.popParent();
 
         const scroller_size_in_percent: f32 = 0.1;
 
         _ = gui.blockLayout("before scroller", .x);
-        gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, scroll_percent - scroller_size_in_percent / 2, 1));
+        gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, scroll_percent * (1 - scroller_size_in_percent), 1));
         gui.withBorder();
 
         const scroller = gui.blockLayout("scroller", .x);
         gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, scroller_size_in_percent, 1));
         gui.withBorder();
+
+        _ = gui.blockLayout("after scroller", .x);
+        gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, (1 - scroll_percent) * (1 - scroller_size_in_percent), 1));
+        gui.withBorder();
+
         if (is_scrolling) {
-            if (rl.IsMouseButtonReleased(rl.MOUSE_BUTTON_LEFT)) is_scrolling = false;
-            scroll_percent += rl.GetMouseDelta().y / @intToFloat(f32, rl.GetScreenHeight());
+            if (rl.IsMouseButtonReleased(rl.MOUSE_BUTTON_LEFT)) {
+                is_scrolling = false;
+                rl.SetMouseCursor(rl.MOUSE_CURSOR_DEFAULT);
+            }
+            scroll_percent += rl.GetMouseDelta().y / scroll_bar.rect.height;
             if (scroll_percent < 0) scroll_percent = 0;
             if (scroll_percent > 1) scroll_percent = 1;
         }
         if (rl.CheckCollisionPointRec(rl.GetMousePosition(), scroller.rect) and rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT)) {
             is_scrolling = true;
+            rl.SetMouseCursor(rl.MOUSE_CURSOR_CROSSHAIR);
         }
-
-        _ = gui.blockLayout("after scroller", .x);
-        gui.withSize(gui.Size.init(.percent_of_parent, 1, 1), gui.Size.init(.percent_of_parent, (1 - scroll_percent) - scroller_size_in_percent / 2, 1));
-        gui.withBorder();
     }
 }
