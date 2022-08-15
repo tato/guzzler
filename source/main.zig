@@ -1,12 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const nfd = @import("nfd");
 const rl = struct {
     usingnamespace @import("raylib");
     usingnamespace @import("raygui");
 };
-
-const FinderPreview = @import("ImagePreview.zig");
-const EditorCanvas = @import("EditorCanvas.zig");
 
 var allocator = std.heap.c_allocator;
 
@@ -15,12 +13,16 @@ pub fn main() void {
 }
 
 fn fallibleMain() !void {
+    var gpa: if (builtin.mode == .Debug) std.heap.GeneralPurposeAllocator(.{}) else void = .{};
+    defer _ = if (builtin.mode == .Debug) gpa.deinit();
+    if (builtin.mode == .Debug) allocator = gpa.allocator();
+
     rl.SetConfigFlags(rl.FLAG_WINDOW_RESIZABLE);
     rl.InitWindow(1600, 900, "Lair of the Evil Guzzler");
     rl.SetWindowMinSize(800, 600);
     rl.SetTargetFPS(60);
 
-    if (@import("builtin").os.tag == .windows) {
+    if (builtin.os.tag == .windows) {
         rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SIZE, 24);
         rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SPACING, 0);
         const segoe_ui = rl.LoadFontEx("c:/windows/fonts/segoeui.ttf", rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_SIZE), null);
@@ -34,9 +36,9 @@ fn fallibleMain() !void {
 
     var finder_column = try FinderColumn.init();
     defer finder_column.deinit();
-    var finder_preview = FinderPreview.init();
-    var editor_canvas = EditorCanvas.init(undefined);
-    _ = editor_canvas;
+
+    var previewing: TextureAndSource = .{};
+    var editing: TextureAndSource = .{};
 
     while (!rl.WindowShouldClose()) {
         var arena = std.heap.ArenaAllocator.init(allocator);
@@ -50,19 +52,26 @@ fn fallibleMain() !void {
 
         rl.ClearBackground(rl.RAYWHITE);
 
-        if (finder_column.clicked_image) |clicked_image| {
-            _ = clicked_image;
+        if (editing.path) |_| {
             // image_preview.image = clicked_image;
             // image_preview.draw(rl.Rectangle.init(0, 0, width * 0.6, height));
 
-            if (rl.GuiButton(rl.Rectangle.init(width - 100 - 16, 16, 100, 40), "Back")) {
-                finder_column.clicked_image = null;
+            const back_button_size = buttonSize("🔙");
+            if (rl.GuiButton(rl.Rectangle.init(width - back_button_size.x - 16, 16, back_button_size.x, back_button_size.y), "🔙")) {
+                editing.unload();
             }
         } else {
             try finder_column.draw(arena.allocator(), withPadding(rl.Rectangle.init(0, 0, width * 0.6, height), 16));
-            if (finder_column.hovered_image) |*hovered_image| {
-                finder_preview.image = hovered_image;
-                finder_preview.draw(rl.Rectangle.init(width * 0.6, 0, width * 0.4, height));
+            if (finder_column.hovered_path) |hovered_path| {
+                const hovered_full_path = try std.fmt.allocPrintZ(arena.allocator(), "{s}/{s}", .{ finder_column.base.?, hovered_path });
+                try previewing.setPath(hovered_full_path);
+
+                finderPreview(withPadding(rl.Rectangle.init(width * 0.6, 0, width * 0.4, height), 16), previewing.tx2d);
+            } else previewing.unload();
+
+            if (finder_column.clicked_path) |clicked_path| {
+                const clicked_full_path = try std.fmt.allocPrintZ(arena.allocator(), "{s}/{s}", .{ finder_column.base.?, clicked_path });
+                try editing.setPath(clicked_full_path);
             }
         }
     }
@@ -92,17 +101,6 @@ fn buttonSize(string: [:0]const u8) rl.Vector2 {
     return rl.Vector2.init(width + 16, height + 8);
 }
 
-fn textBoxPlaceholder(bounds: rl.Rectangle, string: [*:0]const u8) void {
-    var height = @intToFloat(f32, rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_SIZE));
-    height = std.math.clamp(height, 0, bounds.height);
-    const top_pad = (bounds.height - height) / 2;
-    const left_pad = @intToFloat(f32, rl.GuiGetStyle(rl.TEXTBOX, rl.TEXT_PADDING));
-
-    rl.GuiSetStyle(rl.LABEL, rl.TEXT_COLOR_NORMAL, rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_COLOR_DISABLED));
-    rl.GuiLabel(rl.Rectangle.init(bounds.x + left_pad, bounds.y + top_pad, bounds.width - left_pad, height), string);
-    rl.GuiSetStyle(rl.LABEL, rl.TEXT_COLOR_NORMAL, rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_COLOR_NORMAL));
-}
-
 const FinderColumn = struct {
     base: ?[]const u8 = null,
     search_buffer: [:0]u8,
@@ -110,8 +108,7 @@ const FinderColumn = struct {
     image_path_list: std.ArrayListUnmanaged([:0]const u8) = .{},
     image_path_list_scroll: rl.Vector2 = std.mem.zeroes(rl.Vector2),
     hovered_path: ?[:0]const u8 = null,
-    hovered_image: ?rl.Texture = null,
-    clicked_image: ?*rl.Texture = null,
+    clicked_path: ?[:0]const u8 = null,
 
     fn init() !FinderColumn {
         const search_buffer = try allocator.allocSentinel(u8, 1 << 10, 0);
@@ -125,7 +122,6 @@ const FinderColumn = struct {
         if (widget.base) |base| allocator.free(base);
         allocator.free(widget.search_buffer);
         widget.clearImagePathList();
-        widget.clearHovered();
         widget.* = undefined;
     }
 
@@ -155,55 +151,68 @@ const FinderColumn = struct {
         }
 
         {
-            const search_box_bounds = rl.Rectangle.init(bounds.x, y, bounds.width, text_size + gap);
+            var search_box_bounds = rl.Rectangle.init(bounds.x, y, bounds.width, text_size + gap);
             defer y += search_box_bounds.height + gap;
 
             if (rl.GuiTextBox(search_box_bounds, widget.search_buffer, widget.search_edit_mode))
                 widget.search_edit_mode = !widget.search_edit_mode;
-            if (widget.search_buffer[0] == 0)
-                textBoxPlaceholder(search_box_bounds, "Search...");
+            search_box_bounds.x += @intToFloat(f32, rl.GuiGetStyle(rl.TEXTBOX, rl.TEXT_PADDING));
+            if (widget.search_buffer[0] == 0) {
+                rl.GuiSetStyle(rl.LABEL, rl.TEXT_COLOR_NORMAL, rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_COLOR_DISABLED));
+                rl.GuiLabel(search_box_bounds, "Search...");
+                rl.GuiSetStyle(rl.LABEL, rl.TEXT_COLOR_NORMAL, rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_COLOR_NORMAL));
+            }
         }
 
+        const search_buffer_span = std.mem.sliceTo(widget.search_buffer, 0);
+        const search_lower_buffer = try arena.alloc(u8, search_buffer_span.len);
+        const search_lower = std.ascii.lowerString(search_lower_buffer, search_buffer_span);
+
+        const scrollbar_width = @intToFloat(f32, rl.GuiGetStyle(rl.DEFAULT, rl.SCROLLBAR_WIDTH));
         const image_path_list_height = @intToFloat(f32, widget.image_path_list.items.len) * (text_size + gap);
+
         const view = rl.GuiScrollPanel(
             rl.Rectangle.init(bounds.x, y, bounds.width, bounds.height - y),
             null,
-            rl.Rectangle.init(bounds.x, y, bounds.width, image_path_list_height),
+            rl.Rectangle.init(bounds.x, y, bounds.width - scrollbar_width, image_path_list_height),
             &widget.image_path_list_scroll,
         ).asInt();
         rl.BeginScissorMode(view.x, view.y, view.width, view.height);
-        y += gap;
-        var is_hovering = false;
+
+        widget.hovered_path = null;
+        widget.clicked_path = null;
+        var list_item_position = rl.Vector2.init(
+            bounds.x + widget.image_path_list_scroll.x + gap,
+            y + widget.image_path_list_scroll.y,
+        );
         for (widget.image_path_list.items) |path| {
+            if (search_lower.len > 0) {
+                const path_lower_buffer = try arena.alloc(u8, path.len);
+                const path_lower = std.ascii.lowerString(path_lower_buffer, path);
+                if (std.mem.indexOf(u8, path_lower, search_lower) == null) continue;
+            }
+
+            const size = buttonSize(path);
+            defer list_item_position.y += size.y;
+
             const list_item_bounds = rl.Rectangle.init(
-                bounds.x + widget.image_path_list_scroll.x,
-                y + widget.image_path_list_scroll.y,
-                bounds.width,
-                text_size,
+                list_item_position.x,
+                list_item_position.y,
+                size.x,
+                size.y,
             );
             if (rl.CheckCollisionPointRec(rl.GetMousePosition(), list_item_bounds)) {
-                is_hovering = true;
                 rl.GuiSetStyle(rl.LABEL, rl.TEXT_COLOR_NORMAL, rl.GuiGetStyle(rl.BUTTON, rl.TEXT_COLOR_FOCUSED));
 
-                const replace_hovered_path = if (widget.hovered_path) |hp| !std.mem.eql(u8, hp, path) else true;
-                if (replace_hovered_path) {
-                    if (widget.hovered_path) |hp| allocator.free(hp);
-                    widget.hovered_path = try allocator.dupeZ(u8, path);
-                    const hovered_full_path = try std.fmt.allocPrintZ(arena, "{s}/{s}", .{ widget.base.?, widget.hovered_path.? });
-                    widget.hovered_image = rl.LoadTexture(hovered_full_path);
-                }
-
+                widget.hovered_path = path;
                 if (rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT)) {
-                    widget.clicked_image = &widget.hovered_image.?;
+                    widget.clicked_path = path;
                 }
             }
             rl.GuiLabel(list_item_bounds, path);
             rl.GuiSetStyle(rl.LABEL, rl.TEXT_COLOR_NORMAL, rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_COLOR_NORMAL));
-            y += text_size + gap;
         }
         rl.EndScissorMode();
-
-        if (!is_hovering) widget.clearHovered();
     }
 
     fn setBase(widget: *FinderColumn, base: []const u8) !void {
@@ -234,15 +243,38 @@ const FinderColumn = struct {
     }
 
     fn clearImagePathList(widget: *FinderColumn) void {
+        widget.hovered_path = null;
+        widget.clicked_path = null;
         for (widget.image_path_list.items) |path| allocator.free(path);
         widget.image_path_list.deinit(allocator);
         widget.image_path_list = .{};
     }
+};
 
-    fn clearHovered(widget: *FinderColumn) void {
-        if (widget.hovered_path) |hp| allocator.free(hp);
-        if (widget.hovered_image) |im| rl.UnloadTexture(im);
-        widget.hovered_path = null;
-        widget.hovered_image = null;
+pub fn finderPreview(bounds: rl.Rectangle, maybe_texture: ?rl.Texture) void {
+    const texture = maybe_texture orelse return;
+    const scale_x = bounds.width / @intToFloat(f32, texture.width);
+    const scale_y = bounds.height / @intToFloat(f32, texture.height);
+    const scale = if (scale_x < scale_y) scale_x else scale_y;
+    rl.DrawTextureEx(texture, rl.Vector2.init(bounds.x, bounds.y), 0, scale, rl.WHITE);
+}
+
+const TextureAndSource = struct {
+    path: ?[:0]const u8 = null,
+    tx2d: ?rl.Texture2D = null,
+
+    fn unload(tas: *TextureAndSource) void {
+        if (tas.path) |path| allocator.free(path);
+        if (tas.tx2d) |tex| rl.UnloadTexture(tex);
+        tas.path = null;
+        tas.tx2d = null;
+    }
+
+    fn setPath(tas: *TextureAndSource, path: [:0]const u8) !void {
+        if (tas.path) |tas_path| if (std.mem.eql(u8, tas_path, path)) return;
+
+        tas.unload();
+        tas.path = try allocator.dupeZ(u8, path);
+        tas.tx2d = rl.LoadTexture(path);
     }
 };
