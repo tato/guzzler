@@ -385,29 +385,27 @@ fn drawCanvas(
     const scaled_sprite_width = scale * sprite_width;
     const scaled_sprite_height = scale * sprite_height;
 
-    var x: f32 = bounds.x;
+    var x: f32 = 0;
     while (x < image_width * scale) : (x += scaled_sprite_width) {
-        rl.DrawLineEx(rl.Vector2.init(x, bounds.y), rl.Vector2.init(x, image_height * scale), 1, rl.BLUE);
+        rl.DrawLineEx(rl.Vector2.init(bounds.x + x, bounds.y), rl.Vector2.init(bounds.x + x, image_height * scale), 1, rl.BLUE);
     }
-    rl.DrawLineEx(rl.Vector2.init(x, bounds.y), rl.Vector2.init(x, image_height * scale), 1, rl.BLUE);
 
-    var y: f32 = bounds.y;
+    var y: f32 = 0;
     while (y < image_height * scale) : (y += scaled_sprite_height) {
-        rl.DrawLineEx(rl.Vector2.init(bounds.x, y), rl.Vector2.init(image_width * scale, y), 1, rl.BLUE);
+        rl.DrawLineEx(rl.Vector2.init(bounds.x, bounds.y + y), rl.Vector2.init(image_width * scale, bounds.y + y), 1, rl.BLUE);
     }
-    rl.DrawLineEx(rl.Vector2.init(bounds.x, y), rl.Vector2.init(image_width * scale, y), 1, rl.BLUE);
 
-    // let shouldBreak = false
-    // for (let y = 0; y < scaledHeight + 1 && !shouldBreak; y += scaledSpriteWidth) {
-    //     for (let x = 0; x < scaledWidth + 1 && !shouldBreak; x += scaledSpriteHeight) {
-    //         if (mousePos[0] < x + scaledSpriteWidth && mousePos[1] < y + scaledSpriteHeight) {
-    //             ctx.fillStyle = "rgba(100, 200, 100, 0.4)"
-    //             ctx.fillRect(x, y, scale * spriteWidth, scale * spriteHeight)
-    //             setHoveredRect([x / scale, y / scale, spriteWidth, spriteHeight])
-    //             shouldBreak = true
-    //         }
-    //     }
-    // }
+    y = 0;
+    find_hover: while (y < image_height * scale) : (y += scaled_sprite_height) {
+        x = 0;
+        while (x < image_width * scale) : (x += scaled_sprite_width) {
+            const rect = rl.Rectangle.init(bounds.x + x, bounds.y + y, scaled_sprite_width, scaled_sprite_height);
+            if (rl.CheckCollisionPointRec(rl.GetMousePosition(), rect)) {
+                rl.DrawRectangleRec(rect, rl.Color.init(100, 200, 100, 100));
+                break :find_hover;
+            }
+        }
+    }
 
     // for (const [x, y, name] of spriteNames) {
     //     const spriteRect = [x * scaledSpriteWidth, y * scaledSpriteHeight, scaledSpriteWidth, scaledSpriteHeight]
