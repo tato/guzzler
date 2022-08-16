@@ -5,7 +5,7 @@ pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
 
-    const exe = b.addExecutable("guzzler", "source/main.zig");
+    const exe = b.addExecutable("guzzler", "main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.linkLibC();

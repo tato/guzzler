@@ -22,17 +22,9 @@ fn fallibleMain() !void {
     rl.SetWindowMinSize(800, 600);
     rl.SetTargetFPS(60);
 
-    if (builtin.os.tag == .windows) {
-        rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SIZE, 24);
-        rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SPACING, 0);
-        const segoe_ui = rl.LoadFontEx("c:/windows/fonts/segoeui.ttf", rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_SIZE), null);
-        rl.GuiSetFont(segoe_ui);
-    } else {
-        rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SIZE, 22);
-        const embedded_font_data = @embedFile("../raylib/raygui/styles/enefete/GenericMobileSystemNuevo.ttf");
-        const embedded_font = rl.LoadFontFromMemory(".ttf", embedded_font_data, rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_SIZE), null);
-        rl.GuiSetFont(embedded_font);
-    }
+    rl.GuiLoadStyle(themes[current_theme]);
+
+    setGuiFont();
 
     var finder_column = try FinderColumn.init();
     defer finder_column.deinit();
@@ -52,16 +44,18 @@ fn fallibleMain() !void {
         const width = @intToFloat(f32, rl.GetRenderWidth());
         const height = @intToFloat(f32, rl.GetRenderHeight());
 
-        rl.ClearBackground(rl.RAYWHITE);
+        handleThemeSwap();
+
+        rl.ClearBackground(rl.GetColor(@bitCast(c_uint, rl.GuiGetStyle(rl.DEFAULT, rl.BACKGROUND_COLOR))));
 
         if (editing.path) |_| {
-            try single_sheet_editor.draw(arena.allocator(), withPadding(rl.Rectangle.init(0, 0, width, height), 16), &editing);
+            try single_sheet_editor.draw(arena.allocator(), withPadding(rl.Rectangle.init(0, 0, width, height), 8), &editing);
         } else {
-            try finder_column.draw(arena.allocator(), withPadding(rl.Rectangle.init(0, 0, width * 0.6, height), 16));
+            try finder_column.draw(arena.allocator(), withPadding(rl.Rectangle.init(0, 0, width * 0.6, height), 8));
             if (finder_column.hovered_path) |hovered_path| {
                 try previewing.setPath(finder_column.base, hovered_path);
 
-                finderPreview(withPadding(rl.Rectangle.init(width * 0.6, 0, width * 0.4, height), 16), previewing.tx2d);
+                finderPreview(withPadding(rl.Rectangle.init(width * 0.6, 0, width * 0.4, height), 8), previewing.tx2d);
             } else previewing.unload();
 
             if (finder_column.clicked_path) |clicked_path| {
@@ -70,6 +64,18 @@ fn fallibleMain() !void {
         }
     }
 }
+
+const themes_path = "c:/code/guzzler_habitat/raylib/raygui/styles/";
+const themes = blk: {
+    var tt: []const [*:0]const u8 = &.{};
+    for (&[_][]const u8{
+        "ashes", "bluish", "candy", "cherry", "cyber", "dark", "default", "enefete", "jungle", "lavanda", "sunny", "terminal",
+    }) |theme_name| {
+        tt = tt ++ &[1][*:0]const u8{themes_path ++ theme_name ++ "/" ++ theme_name ++ ".rgs"};
+    }
+    break :blk tt;
+};
+var current_theme: usize = 6;
 
 fn withPadding(bounds: rl.Rectangle, padding: f32) rl.Rectangle {
     return rl.Rectangle.init(
@@ -93,6 +99,33 @@ fn buttonSize(string: [:0]const u8) rl.Vector2 {
     const width = measureWidth(string);
     const height = @intToFloat(f32, rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_SIZE));
     return rl.Vector2.init(width + 16, height + 8);
+}
+
+fn setGuiFont() void {
+    if (builtin.os.tag == .windows) {
+        rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SIZE, 24);
+        rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SPACING, 0);
+        const segoe_ui = rl.LoadFontEx("c:/windows/fonts/segoeui.ttf", rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_SIZE), null);
+        rl.GuiSetFont(segoe_ui);
+    } else {
+        rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SIZE, 22);
+        const embedded_font_data = @embedFile("raylib/raygui/styles/enefete/GenericMobileSystemNuevo.ttf");
+        const embedded_font = rl.LoadFontFromMemory(".ttf", embedded_font_data, rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_SIZE), null);
+        rl.GuiSetFont(embedded_font);
+    }
+}
+
+fn handleThemeSwap() void {
+    if (rl.IsKeyPressed(rl.KEY_RIGHT)) {
+        current_theme = (current_theme + 1) % themes.len;
+        rl.GuiLoadStyle(themes[current_theme]);
+        setGuiFont();
+    }
+    if (rl.IsKeyPressed(rl.KEY_LEFT)) {
+        current_theme = (current_theme - 1) % themes.len;
+        rl.GuiLoadStyle(themes[current_theme]);
+        setGuiFont();
+    }
 }
 
 const FinderColumn = struct {
@@ -131,7 +164,7 @@ const FinderColumn = struct {
     }
 
     fn draw(widget: *FinderColumn, arena: std.mem.Allocator, bounds: rl.Rectangle) !void {
-        const gap = 8;
+        const gap = 4;
         const text_size = @intToFloat(f32, rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_SIZE));
 
         var y = bounds.y;
@@ -321,10 +354,10 @@ const SingleSheetEditor = struct {
     fn draw(widget: *SingleSheetEditor, arena: std.mem.Allocator, bounds: rl.Rectangle, editing: *TextureAndSource) !void {
         _ = arena;
 
-        const gap = 8;
-        const separator_width = 16;
+        const gap = 4;
+        const separator_width = 8;
         const canvas_bounds = rl.Rectangle.init(bounds.x, bounds.y, bounds.width * 0.6 - separator_width / 2, bounds.height);
-        const controls_start = canvas_bounds.width + separator_width;
+        const controls_start = bounds.x + canvas_bounds.width + separator_width;
         const controls_width = bounds.width - controls_start;
         const controls_bounds = rl.Rectangle.init(controls_start, bounds.y, controls_width, bounds.height);
 
@@ -385,14 +418,18 @@ fn drawCanvas(
     const scaled_sprite_width = scale * sprite_width;
     const scaled_sprite_height = scale * sprite_height;
 
+    const line_color = rl.GetColor(@bitCast(c_uint, rl.GuiGetStyle(rl.DEFAULT, rl.BORDER_COLOR_FOCUSED)));
+    var hover_color = rl.GetColor(@bitCast(c_uint, rl.GuiGetStyle(rl.DEFAULT, rl.BASE_COLOR_FOCUSED)));
+    hover_color.a = @floatToInt(u8, 256.0 * 0.3);
+
     var x: f32 = 0;
     while (x < image_width * scale) : (x += scaled_sprite_width) {
-        rl.DrawLineEx(rl.Vector2.init(bounds.x + x, bounds.y), rl.Vector2.init(bounds.x + x, image_height * scale), 1, rl.BLUE);
+        rl.DrawLineEx(rl.Vector2.init(bounds.x + x, bounds.y), rl.Vector2.init(bounds.x + x, bounds.y + image_height * scale), 1, line_color);
     }
 
     var y: f32 = 0;
     while (y < image_height * scale) : (y += scaled_sprite_height) {
-        rl.DrawLineEx(rl.Vector2.init(bounds.x, bounds.y + y), rl.Vector2.init(image_width * scale, bounds.y + y), 1, rl.BLUE);
+        rl.DrawLineEx(rl.Vector2.init(bounds.x, bounds.y + y), rl.Vector2.init(bounds.x + image_width * scale, bounds.y + y), 1, line_color);
     }
 
     y = 0;
@@ -401,7 +438,7 @@ fn drawCanvas(
         while (x < image_width * scale) : (x += scaled_sprite_width) {
             const rect = rl.Rectangle.init(bounds.x + x, bounds.y + y, scaled_sprite_width, scaled_sprite_height);
             if (rl.CheckCollisionPointRec(rl.GetMousePosition(), rect)) {
-                rl.DrawRectangleRec(rect, rl.Color.init(100, 200, 100, 100));
+                rl.DrawRectangleRec(rect, hover_color);
                 break :find_hover;
             }
         }
