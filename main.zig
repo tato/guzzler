@@ -122,7 +122,7 @@ fn handleThemeSwap() void {
         setGuiFont();
     }
     if (rl.IsKeyPressed(rl.KEY_LEFT)) {
-        current_theme = (current_theme - 1) % themes.len;
+        if (@subWithOverflow(usize, current_theme, 1, &current_theme)) current_theme = themes.len - 1;
         rl.GuiLoadStyle(themes[current_theme]);
         setGuiFont();
     }
@@ -216,34 +216,37 @@ const FinderColumn = struct {
             scroll_content_bounds,
             &widget.path_list_scroll,
         ).asInt();
-        rl.BeginScissorMode(view.x, view.y, view.width, view.height);
 
-        widget.hovered_path = null;
-        widget.clicked_path = null;
-        var list_item_position = rl.Vector2.init(
-            bounds.x + widget.path_list_scroll.x + gap,
-            y + widget.path_list_scroll.y,
-        );
-        for (filtered_paths) |path| {
-            list_item_position.y += gap;
-            defer list_item_position.y += edit_button_size.y;
+        {
+            rl.BeginScissorMode(view.x, view.y, view.width, view.height);
+            defer rl.EndScissorMode();
 
-            const list_item_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, scroll_content_bounds.width, edit_button_size.y);
-            var edit_button_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, edit_button_size.x, edit_button_size.y);
-            edit_button_bounds.x = scroll_content_bounds.x + scroll_content_bounds.width - edit_button_size.x;
+            widget.hovered_path = null;
+            widget.clicked_path = null;
+            var list_item_position = rl.Vector2.init(
+                bounds.x + widget.path_list_scroll.x + gap,
+                y + widget.path_list_scroll.y,
+            );
+            for (filtered_paths) |path| {
+                list_item_position.y += gap;
+                defer list_item_position.y += edit_button_size.y;
 
-            if (rl.CheckCollisionPointRec(rl.GetMousePosition(), list_item_bounds)) {
-                const focused_color = rl.GetColor(@bitCast(c_uint, rl.GuiGetStyle(rl.DEFAULT, rl.BASE_COLOR_FOCUSED)));
-                rl.DrawRectangleRec(withPadding(list_item_bounds, -gap / 2), focused_color);
-                widget.hovered_path = path;
-            }
-            rl.GuiLabel(list_item_bounds, path);
+                const list_item_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, scroll_content_bounds.width, edit_button_size.y);
+                var edit_button_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, edit_button_size.x, edit_button_size.y);
+                edit_button_bounds.x = scroll_content_bounds.x + scroll_content_bounds.width - edit_button_size.x;
 
-            if (rl.GuiButton(edit_button_bounds, edit_button_label)) {
-                widget.clicked_path = path;
+                if (rl.CheckCollisionPointRec(rl.GetMousePosition(), list_item_bounds)) {
+                    const focused_color = rl.GetColor(@bitCast(c_uint, rl.GuiGetStyle(rl.DEFAULT, rl.BASE_COLOR_FOCUSED)));
+                    rl.DrawRectangleRec(withPadding(list_item_bounds, -gap / 2), focused_color);
+                    widget.hovered_path = path;
+                }
+                rl.GuiLabel(list_item_bounds, path);
+
+                if (rl.GuiButton(edit_button_bounds, edit_button_label)) {
+                    widget.clicked_path = path;
+                }
             }
         }
-        rl.EndScissorMode();
     }
 
     fn setBase(widget: *FinderColumn, base_path: []const u8) !void {
@@ -333,6 +336,8 @@ const SingleSheetEditor = struct {
     h_buffer: [:0]u8,
     h_editing: bool = false,
     h_parsed: ?u15 = null,
+    added: std.ArrayListUnmanaged(AddedSprite) = .{},
+    list_scroll: rl.Vector2 = rl.Vector2.init(0, 0),
 
     fn init() !SingleSheetEditor {
         const w_buffer = try allocator.allocSentinel(u8, 1 << 10, 0);
@@ -349,11 +354,11 @@ const SingleSheetEditor = struct {
     fn deinit(widget: *SingleSheetEditor) void {
         allocator.free(widget.w_buffer);
         allocator.free(widget.h_buffer);
+        for (widget.added.items) |added| allocator.free(added.name);
+        widget.added.deinit(allocator);
     }
 
     fn draw(widget: *SingleSheetEditor, arena: std.mem.Allocator, bounds: rl.Rectangle, editing: *TextureAndSource) !void {
-        _ = arena;
-
         const gap = 4;
         const separator_width = 8;
         const canvas_bounds = rl.Rectangle.init(bounds.x, bounds.y, bounds.width * 0.6 - separator_width / 2, bounds.height);
@@ -361,13 +366,14 @@ const SingleSheetEditor = struct {
         const controls_width = bounds.width - controls_start;
         const controls_bounds = rl.Rectangle.init(controls_start, bounds.y, controls_width, bounds.height);
 
-        drawCanvas(canvas_bounds, editing.tx2d, widget.w_parsed, widget.h_parsed);
+        const to_add = drawCanvas(canvas_bounds, editing.tx2d, widget.w_parsed, widget.h_parsed);
+        if (to_add) |it| try widget.added.append(allocator, it);
 
         var y = controls_bounds.y;
 
         {
             const back_button_size = buttonSize("🔙");
-            defer y += back_button_size.y + gap;
+            // defer y += back_button_size.y + gap; // overlap with width/height input labels
             if (rl.GuiButton(rl.Rectangle.init(controls_start + controls_width - back_button_size.x, y, back_button_size.x, back_button_size.y), "🔙")) {
                 editing.unload();
                 return;
@@ -395,7 +401,56 @@ const SingleSheetEditor = struct {
             widget.w_parsed = std.fmt.parseInt(u15, std.mem.sliceTo(widget.w_buffer, 0), 10) catch null;
             widget.h_parsed = std.fmt.parseInt(u15, std.mem.sliceTo(widget.h_buffer, 0), 10) catch null;
         }
+
+        const x_button_label = "X";
+        const x_button_size = buttonSize(x_button_label);
+        const scrollbar_width = 16; // lol
+        const list_height = @round(@intToFloat(f32, widget.added.items.len) * (x_button_size.y + gap) + gap);
+        const scroll_panel_bounds = rl.Rectangle.init(controls_start, y, controls_width, bounds.height - y);
+        const scroll_content_bounds = rl.Rectangle.init(controls_start, y, controls_width - scrollbar_width, list_height);
+
+        const view = rl.GuiScrollPanel(
+            scroll_panel_bounds,
+            "Added sprites",
+            scroll_content_bounds,
+            &widget.list_scroll,
+        ).asInt();
+
+        {
+            rl.BeginScissorMode(view.x, view.y, view.width, view.height);
+            defer rl.EndScissorMode();
+
+            var remove_added: ?usize = null;
+
+            var list_item_position = rl.Vector2.init(
+                controls_start + widget.list_scroll.x + gap,
+                y + widget.list_scroll.y,
+            );
+            for (widget.added.items) |added, i| {
+                list_item_position.y += gap;
+                defer list_item_position.y += x_button_size.y;
+
+                const list_item_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, scroll_content_bounds.width, x_button_size.y);
+                var x_button_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, x_button_size.x, x_button_size.y);
+                x_button_bounds.x = scroll_content_bounds.x + scroll_content_bounds.width - x_button_size.x;
+
+                const item_label = try std.fmt.allocPrintZ(arena, "{d},{d}: {s}", .{ added.x, added.y, added.name });
+                rl.GuiLabel(list_item_bounds, item_label);
+
+                if (rl.GuiButton(x_button_bounds, x_button_label)) {
+                    remove_added = i;
+                }
+            }
+
+            if (remove_added) |idx| _ = widget.added.orderedRemove(idx);
+        }
     }
+};
+
+const AddedSprite = struct {
+    x: u15,
+    y: u15,
+    name: [:0]const u8,
 };
 
 fn drawCanvas(
@@ -403,8 +458,10 @@ fn drawCanvas(
     maybe_image: ?rl.Texture2D,
     maybe_sprite_width: ?u15,
     maybe_sprite_height: ?u15,
-) void {
-    const image = maybe_image orelse return;
+) ?AddedSprite {
+    var result: ?AddedSprite = null;
+
+    const image = maybe_image orelse return result;
     const image_width = @intToFloat(f32, image.width);
     const image_height = @intToFloat(f32, image.height);
     const scale_x = bounds.width / image_width;
@@ -412,8 +469,8 @@ fn drawCanvas(
     const scale = if (scale_x < scale_y) scale_x else scale_y;
     rl.DrawTextureEx(image, rl.Vector2.init(bounds.x, bounds.y), 0, scale, rl.WHITE);
 
-    const sprite_width = @intToFloat(f32, maybe_sprite_width orelse return);
-    const sprite_height = @intToFloat(f32, maybe_sprite_height orelse return);
+    const sprite_width = @intToFloat(f32, maybe_sprite_width orelse return result);
+    const sprite_height = @intToFloat(f32, maybe_sprite_height orelse return result);
     const sprites_wide = @intCast(u15, image.width) / maybe_sprite_width.?;
     const sprites_high = @intCast(u15, image.height) / maybe_sprite_height.?;
 
@@ -457,6 +514,9 @@ fn drawCanvas(
             );
             if (rl.CheckCollisionPointRec(rl.GetMousePosition(), rect)) {
                 rl.DrawRectangleRec(rect, hover_color);
+                if (rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT)) {
+                    result = AddedSprite{ .x = @truncate(u15, x), .y = @truncate(u15, y), .name = "d(-.-)b" };
+                }
                 break :find_hover;
             }
         }
@@ -482,4 +542,6 @@ fn drawCanvas(
 
     //     ctx.restore()
     // }
+
+    return result;
 }
