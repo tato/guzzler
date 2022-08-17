@@ -414,29 +414,47 @@ fn drawCanvas(
 
     const sprite_width = @intToFloat(f32, maybe_sprite_width orelse return);
     const sprite_height = @intToFloat(f32, maybe_sprite_height orelse return);
-
-    const scaled_sprite_width = scale * sprite_width;
-    const scaled_sprite_height = scale * sprite_height;
+    const sprites_wide = @intCast(u15, image.width) / maybe_sprite_width.?;
+    const sprites_high = @intCast(u15, image.height) / maybe_sprite_height.?;
 
     const line_color = rl.GetColor(@bitCast(c_uint, rl.GuiGetStyle(rl.DEFAULT, rl.BORDER_COLOR_FOCUSED)));
     var hover_color = rl.GetColor(@bitCast(c_uint, rl.GuiGetStyle(rl.DEFAULT, rl.BASE_COLOR_FOCUSED)));
     hover_color.a = @floatToInt(u8, 256.0 * 0.3);
 
-    var x: f32 = 0;
-    while (x < image_width * scale) : (x += scaled_sprite_width) {
-        rl.DrawLineEx(rl.Vector2.init(bounds.x + x, bounds.y), rl.Vector2.init(bounds.x + x, bounds.y + image_height * scale), 1, line_color);
+    var x: u32 = 0;
+    while (x <= sprites_wide) : (x += 1) {
+        const xf = @intToFloat(f32, x);
+        rl.DrawLineEx(
+            rl.Vector2.init(bounds.x + xf * scale * sprite_width, bounds.y),
+            rl.Vector2.init(bounds.x + xf * scale * sprite_width, bounds.y + image_height * scale),
+            1,
+            line_color,
+        );
     }
 
-    var y: f32 = 0;
-    while (y < image_height * scale) : (y += scaled_sprite_height) {
-        rl.DrawLineEx(rl.Vector2.init(bounds.x, bounds.y + y), rl.Vector2.init(bounds.x + image_width * scale, bounds.y + y), 1, line_color);
+    var y: u32 = 0;
+    while (y <= sprites_high) : (y += 1) {
+        const yf = @intToFloat(f32, y);
+        rl.DrawLineEx(
+            rl.Vector2.init(bounds.x, bounds.y + yf * scale * sprite_height),
+            rl.Vector2.init(bounds.x + image_width * scale, bounds.y + yf * scale * sprite_height),
+            1,
+            line_color,
+        );
     }
 
     y = 0;
-    find_hover: while (y < image_height * scale) : (y += scaled_sprite_height) {
+    find_hover: while (y < sprites_high) : (y += 1) {
+        const yf = @intToFloat(f32, y);
         x = 0;
-        while (x < image_width * scale) : (x += scaled_sprite_width) {
-            const rect = rl.Rectangle.init(bounds.x + x, bounds.y + y, scaled_sprite_width, scaled_sprite_height);
+        while (x < sprites_wide) : (x += 1) {
+            const xf = @intToFloat(f32, x);
+            const rect = rl.Rectangle.init(
+                bounds.x + xf * scale * sprite_width,
+                bounds.y + yf * scale * sprite_height,
+                scale * sprite_width,
+                scale * sprite_height,
+            );
             if (rl.CheckCollisionPointRec(rl.GetMousePosition(), rect)) {
                 rl.DrawRectangleRec(rect, hover_color);
                 break :find_hover;
