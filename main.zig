@@ -354,7 +354,7 @@ const SingleSheetEditor = struct {
     fn deinit(widget: *SingleSheetEditor) void {
         allocator.free(widget.w_buffer);
         allocator.free(widget.h_buffer);
-        for (widget.added.items) |added| allocator.free(added.name);
+        for (widget.added.items) |*added| added.deinit();
         widget.added.deinit(allocator);
     }
 
@@ -366,7 +366,7 @@ const SingleSheetEditor = struct {
         const controls_width = bounds.width - controls_start;
         const controls_bounds = rl.Rectangle.init(controls_start, bounds.y, controls_width, bounds.height);
 
-        const to_add = drawCanvas(canvas_bounds, editing.tx2d, widget.w_parsed, widget.h_parsed);
+        const to_add = try drawCanvas(canvas_bounds, editing.tx2d, widget.w_parsed, widget.h_parsed);
         if (to_add) |it| try widget.added.append(allocator, it);
 
         var y = controls_bounds.y;
@@ -404,14 +404,15 @@ const SingleSheetEditor = struct {
 
         const x_button_label = "X";
         const x_button_size = buttonSize(x_button_label);
+        const list_item_height = x_button_size.y * 2 + gap;
         const scrollbar_width = 16; // lol
-        const list_height = @round(@intToFloat(f32, widget.added.items.len) * (x_button_size.y + gap) + gap);
+        const list_height = @round(@intToFloat(f32, widget.added.items.len) * (list_item_height + gap) + gap);
         const scroll_panel_bounds = rl.Rectangle.init(controls_start, y, controls_width, bounds.height - y);
         const scroll_content_bounds = rl.Rectangle.init(controls_start, y, controls_width - scrollbar_width, list_height);
 
         const view = rl.GuiScrollPanel(
             scroll_panel_bounds,
-            "Added sprites",
+            null,
             scroll_content_bounds,
             &widget.list_scroll,
         ).asInt();
@@ -424,22 +425,26 @@ const SingleSheetEditor = struct {
 
             var list_item_position = rl.Vector2.init(
                 controls_start + widget.list_scroll.x + gap,
-                y + widget.list_scroll.y,
+                scroll_content_bounds.y + widget.list_scroll.y,
             );
-            for (widget.added.items) |added, i| {
+            for (widget.added.items) |*added, i| {
                 list_item_position.y += gap;
-                defer list_item_position.y += x_button_size.y;
+                defer list_item_position.y += list_item_height + gap;
 
-                const list_item_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, scroll_content_bounds.width, x_button_size.y);
+                const label_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, scroll_content_bounds.width, x_button_size.y);
                 var x_button_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, x_button_size.x, x_button_size.y);
                 x_button_bounds.x = scroll_content_bounds.x + scroll_content_bounds.width - x_button_size.x;
+                const input_bounds = rl.Rectangle.init(label_bounds.x, label_bounds.y + gap + label_bounds.height, scroll_content_bounds.width, x_button_size.y);
 
-                const item_label = try std.fmt.allocPrintZ(arena, "{d},{d}: {s}", .{ added.x, added.y, added.name });
-                rl.GuiLabel(list_item_bounds, item_label);
+                const item_label = try std.fmt.allocPrintZ(arena, "{d}, {d}", .{ added.x, added.y });
+                rl.GuiLabel(label_bounds, item_label);
 
                 if (rl.GuiButton(x_button_bounds, x_button_label)) {
                     remove_added = i;
                 }
+
+                if (rl.GuiTextBox(input_bounds, added.name_buffer, added.name_editing))
+                    added.name_editing = !added.name_editing;
             }
 
             if (remove_added) |idx| _ = widget.added.orderedRemove(idx);
@@ -450,7 +455,24 @@ const SingleSheetEditor = struct {
 const AddedSprite = struct {
     x: u15,
     y: u15,
-    name: [:0]const u8,
+    name_buffer: [:0]u8,
+    name_editing: bool = false,
+
+    fn init(x: u15, y: u15) !AddedSprite {
+        const buf = try allocator.allocSentinel(u8, 1 << 8, 0);
+        for (buf) |*b| b.* = 0;
+
+        return AddedSprite{
+            .x = x,
+            .y = y,
+            .name_buffer = buf,
+        };
+    }
+
+    fn deinit(added: *AddedSprite) void {
+        allocator.free(added.name_buffer);
+        added.* = undefined;
+    }
 };
 
 fn drawCanvas(
@@ -458,7 +480,7 @@ fn drawCanvas(
     maybe_image: ?rl.Texture2D,
     maybe_sprite_width: ?u15,
     maybe_sprite_height: ?u15,
-) ?AddedSprite {
+) !?AddedSprite {
     var result: ?AddedSprite = null;
 
     const image = maybe_image orelse return result;
@@ -515,7 +537,7 @@ fn drawCanvas(
             if (rl.CheckCollisionPointRec(rl.GetMousePosition(), rect)) {
                 rl.DrawRectangleRec(rect, hover_color);
                 if (rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT)) {
-                    result = AddedSprite{ .x = @truncate(u15, x), .y = @truncate(u15, y), .name = "d(-.-)b" };
+                    result = try AddedSprite.init(@truncate(u15, x), @truncate(u15, y));
                 }
                 break :find_hover;
             }
