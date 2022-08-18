@@ -366,8 +366,7 @@ const SingleSheetEditor = struct {
         const controls_width = bounds.width - controls_start;
         const controls_bounds = rl.Rectangle.init(controls_start, bounds.y, controls_width, bounds.height);
 
-        const to_add = try drawCanvas(canvas_bounds, editing.tx2d, widget.w_parsed, widget.h_parsed);
-        if (to_add) |it| try widget.added.append(allocator, it);
+        try drawCanvas(canvas_bounds, editing.tx2d, widget.w_parsed, widget.h_parsed, &widget.added);
 
         var y = controls_bounds.y;
 
@@ -480,10 +479,9 @@ fn drawCanvas(
     maybe_image: ?rl.Texture2D,
     maybe_sprite_width: ?u15,
     maybe_sprite_height: ?u15,
-) !?AddedSprite {
-    var result: ?AddedSprite = null;
-
-    const image = maybe_image orelse return result;
+    sprites: *std.ArrayListUnmanaged(AddedSprite),
+) !void {
+    const image = maybe_image orelse return;
     const image_width = @intToFloat(f32, image.width);
     const image_height = @intToFloat(f32, image.height);
     const scale_x = bounds.width / image_width;
@@ -491,8 +489,8 @@ fn drawCanvas(
     const scale = if (scale_x < scale_y) scale_x else scale_y;
     rl.DrawTextureEx(image, rl.Vector2.init(bounds.x, bounds.y), 0, scale, rl.WHITE);
 
-    const sprite_width = @intToFloat(f32, maybe_sprite_width orelse return result);
-    const sprite_height = @intToFloat(f32, maybe_sprite_height orelse return result);
+    const sprite_width = @intToFloat(f32, maybe_sprite_width orelse return);
+    const sprite_height = @intToFloat(f32, maybe_sprite_height orelse return);
     const sprites_wide = @intCast(u15, image.width) / maybe_sprite_width.?;
     const sprites_high = @intCast(u15, image.height) / maybe_sprite_height.?;
 
@@ -537,33 +535,47 @@ fn drawCanvas(
             if (rl.CheckCollisionPointRec(rl.GetMousePosition(), rect)) {
                 rl.DrawRectangleRec(rect, hover_color);
                 if (rl.IsMouseButtonPressed(rl.MOUSE_BUTTON_LEFT)) {
-                    result = try AddedSprite.init(@truncate(u15, x), @truncate(u15, y));
+                    const sprite = try AddedSprite.init(@truncate(u15, x), @truncate(u15, y));
+                    try sprites.append(allocator, sprite);
                 }
                 break :find_hover;
             }
         }
     }
 
-    // for (const [x, y, name] of spriteNames) {
-    //     const spriteRect = [x * scaledSpriteWidth, y * scaledSpriteHeight, scaledSpriteWidth, scaledSpriteHeight]
-    //     ctx.fillStyle = "rgba(100, 100, 200, 0.25)"
-    //     ctx.fillRect(...spriteRect)
+    for (sprites.items) |sprite| {
+        const xf = @intToFloat(f32, sprite.x);
+        const yf = @intToFloat(f32, sprite.y);
 
-    //     ctx.save()
-    //     ctx.beginPath()
-    //     ctx.rect(...spriteRect)
-    //     ctx.clip()
+        const rect = rl.Rectangle.init(
+            bounds.x + xf * scale * sprite_width,
+            bounds.y + yf * scale * sprite_height,
+            scale * sprite_width,
+            scale * sprite_height,
+        );
+        // rl.DrawRectangleRec(rect, rl.Color.init(100, 100, 200, 100));
 
-    //     const textPositioning = [x * scaledSpriteWidth + scaledSpriteWidth * 0.05, y * scaledSpriteHeight + scaledSpriteHeight * 0.9]
-    //     ctx.font = "bold 14px sans-serif"
-    //     ctx.textAlign = "start"
-    //     ctx.strokeStyle = "white"
-    //     ctx.strokeText(name, ...textPositioning)
-    //     ctx.fillStyle = "black"
-    //     ctx.fillText(name, ...textPositioning)
+        const irect = rect.asInt();
+        rl.BeginScissorMode(irect.x, irect.y, irect.width, irect.height);
+        defer rl.EndScissorMode();
 
-    //     ctx.restore()
-    // }
+        const save_text_size = rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_SIZE);
+        const save_text_spac = rl.GuiGetStyle(rl.DEFAULT, rl.TEXT_SPACING);
+        const save_font = rl.GuiGetFont();
+        rl.GuiSetFont(rl.GetFontDefault());
+        rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SIZE, rl.GetFontDefault().baseSize);
+        rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SPACING, 1);
+        defer {
+            rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SIZE, save_text_size);
+            rl.GuiSetFont(save_font);
+            rl.GuiSetStyle(rl.DEFAULT, rl.TEXT_SPACING, save_text_spac);
+        }
 
-    return result;
+        const name = std.mem.sliceTo(sprite.name_buffer, 0);
+        const name_size = buttonSize(name);
+        var name_bounds = withPadding(rect, 0);
+        name_bounds.y = name_bounds.y + name_bounds.height - name_size.y;
+        name_bounds.height = name_size.y;
+        rl.GuiStatusBar(name_bounds, name);
+    }
 }
