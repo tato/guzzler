@@ -3,4 +3,4 @@
 	url = https://github.com/tato/raylib-for-zig
 [submodule "nfd-zig"]
 	path = nfd-zig
-	url = https://github.com/tato/nfd-zig
+    url = https://github.com/fabioarnold/nfd-zig
