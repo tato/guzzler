@@ -60,6 +60,7 @@ fn fallibleMain() !void {
 
             if (finder_column.clicked_path) |clicked_path| {
                 try editing.setPath(finder_column.base, clicked_path);
+                try single_sheet_editor.loadFromFile(editing);
             }
         }
     }
@@ -323,12 +324,13 @@ const TextureAndSource = struct {
             if (end_matches) return;
         }
 
-        const full_path = try std.fmt.allocPrintZ(allocator, "{s}/{s}", .{ base, path });
+        const full_path = try std.fs.path.joinZ(allocator, &.{ base, path });
         tas.unload();
         tas.path = full_path;
-        tas.tx2d = rl.LoadTexture(full_path);
+        tas.tx2d = rl.LoadTexture(full_path.ptr);
     }
 };
+
 const SingleSheetEditor = struct {
     w_buffer: [:0]u8,
     w_editing: bool = false,
@@ -358,6 +360,98 @@ const SingleSheetEditor = struct {
         widget.added.deinit(allocator);
     }
 
+    fn reset(widget: *SingleSheetEditor) void {
+        widget.w_buffer[0] = 0;
+        widget.w_editing = false;
+        widget.w_parsed = null;
+        widget.h_buffer[0] = 0;
+        widget.h_editing = false;
+        widget.h_parsed = null;
+        widget.list_scroll = rl.Vector2.init(0, 0);
+        for (widget.added.items) |*added| added.deinit();
+        widget.added.clearRetainingCapacity();
+    }
+
+    fn getJsonFileName(tas: TextureAndSource) ![]const u8 {
+        const dirname = std.fs.path.dirname(tas.path.?).?;
+        const basename = std.fs.path.basename(tas.path.?);
+
+        const index_of_dot = std.mem.lastIndexOfScalar(u8, basename, '.') orelse basename.len;
+        const jsonname = try std.fmt.allocPrint(allocator, "{s}.json", .{basename[0..index_of_dot]});
+        defer allocator.free(jsonname);
+
+        const path = try std.fs.path.join(allocator, &.{ dirname, jsonname });
+        return path;
+    }
+
+    fn loadFromFile(widget: *SingleSheetEditor, tas: TextureAndSource) !void {
+        widget.reset();
+
+        const path = try getJsonFileName(tas);
+        defer allocator.free(path);
+
+        const source_file = std.fs.openFileAbsolute(path, .{ .mode = .read_only }) catch {
+            return;
+        };
+        defer source_file.close();
+
+        const source = try source_file.readToEndAlloc(allocator, 1 << 20);
+        defer allocator.free(source);
+
+        var stream = std.json.TokenStream.init(source);
+
+        const opt = std.json.ParseOptions{ .allocator = allocator };
+        const pod = try std.json.parse(SingleSheetEditorPod, &stream, opt);
+        defer std.json.parseFree(SingleSheetEditorPod, pod, opt);
+
+        widget.w_parsed = pod.sprite_width;
+        const w_as_string = try std.fmt.allocPrint(allocator, "{d}", .{pod.sprite_width});
+        for (w_as_string) |b, i| widget.w_buffer[i] = b;
+        widget.w_buffer[w_as_string.len] = 0;
+        allocator.free(w_as_string);
+
+        const h_as_string = try std.fmt.allocPrint(allocator, "{d}", .{pod.sprite_height});
+        for (h_as_string) |b, i| widget.h_buffer[i] = b;
+        widget.h_buffer[h_as_string.len] = 0;
+        allocator.free(h_as_string);
+
+        for (pod.added) |elem, i| {
+            try widget.added.append(allocator, try AddedSprite.init(elem.x, elem.y));
+            for (elem.name) |b, b_i| {
+                widget.added.items[i].name_buffer[b_i] = b;
+            }
+            widget.added.items[i].name_buffer[elem.name.len] = 0;
+        }
+    }
+
+    fn writeIntoFile(widget: *SingleSheetEditor, tas: TextureAndSource) !void {
+        var added_pod = std.ArrayList(AddedSpritePod).init(allocator);
+        defer added_pod.deinit();
+
+        for (widget.added.items) |elem| {
+            const span = std.mem.sliceTo(elem.name_buffer, 0);
+            try added_pod.append(.{
+                .x = elem.x,
+                .y = elem.y,
+                .name = span,
+            });
+        }
+
+        var pod = SingleSheetEditorPod{
+            .sprite_width = widget.w_parsed orelse return,
+            .sprite_height = widget.h_parsed orelse return,
+            .added = added_pod.toOwnedSlice(),
+        };
+
+        const path = try getJsonFileName(tas);
+        defer allocator.free(path);
+
+        const source_file = try std.fs.createFileAbsolute(path, .{});
+        defer source_file.close();
+
+        try std.json.stringify(pod, .{}, source_file.writer());
+    }
+
     fn draw(widget: *SingleSheetEditor, arena: std.mem.Allocator, bounds: rl.Rectangle, editing: *TextureAndSource) !void {
         const gap = 4;
         const separator_width = 8;
@@ -372,8 +466,8 @@ const SingleSheetEditor = struct {
 
         {
             const back_button_size = buttonSize("🔙");
-            // defer y += back_button_size.y + gap; // overlap with width/height input labels
             if (rl.GuiButton(rl.Rectangle.init(controls_start + controls_width - back_button_size.x, y, back_button_size.x, back_button_size.y), "🔙")) {
+                try widget.writeIntoFile(editing.*);
                 editing.unload();
                 return;
             }
@@ -430,10 +524,10 @@ const SingleSheetEditor = struct {
                 list_item_position.y += gap;
                 defer list_item_position.y += list_item_height + gap;
 
-                const label_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, scroll_content_bounds.width, x_button_size.y);
+                const label_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, scroll_content_bounds.width - gap, x_button_size.y);
                 var x_button_bounds = rl.Rectangle.init(list_item_position.x, list_item_position.y, x_button_size.x, x_button_size.y);
                 x_button_bounds.x = scroll_content_bounds.x + scroll_content_bounds.width - x_button_size.x;
-                const input_bounds = rl.Rectangle.init(label_bounds.x, label_bounds.y + gap + label_bounds.height, scroll_content_bounds.width, x_button_size.y);
+                const input_bounds = rl.Rectangle.init(label_bounds.x, label_bounds.y + gap + label_bounds.height, scroll_content_bounds.width - gap, x_button_size.y);
 
                 const item_label = try std.fmt.allocPrintZ(arena, "{d}, {d}", .{ added.x, added.y });
                 rl.GuiLabel(label_bounds, item_label);
@@ -472,6 +566,17 @@ const AddedSprite = struct {
         allocator.free(added.name_buffer);
         added.* = undefined;
     }
+};
+
+const SingleSheetEditorPod = struct {
+    sprite_width: u15,
+    sprite_height: u15,
+    added: []const AddedSpritePod,
+};
+const AddedSpritePod = struct {
+    x: u15,
+    y: u15,
+    name: []const u8,
 };
 
 fn drawCanvas(
